@@ -1,0 +1,28 @@
+<?php
+// Copy to config.local.php on the server and fill in. Never commit config.local.php.
+// Each LOCAL_X overrides setting X in config.php (environment variables work too).
+const LOCAL_APP_ENV = 'production';
+const LOCAL_APP_URL = 'https://www.your-domain.com';
+const LOCAL_COMPANY_NAME = 'Your Company LLC';
+const LOCAL_COMPANY_ADDRESS = '1 Main St, Portland, OR 97201';
+const LOCAL_SUPPORT_EMAIL = 'support@your-domain.com';
+const LOCAL_GOVERNING_STATE = 'Oregon';
+
+const LOCAL_DB_HOST = '127.0.0.1';
+const LOCAL_DB_NAME = 'rethread';
+const LOCAL_DB_USER = 'rethread';
+const LOCAL_DB_PASS = 'a-long-random-password';
+
+const LOCAL_STRIPE_SECRET_KEY = 'sk_test_...';
+const LOCAL_STRIPE_WEBHOOK_SECRET = 'whsec_...';
+const LOCAL_SHIPPO_API_KEY = 'shippo_test_...';
+const LOCAL_SHIPPO_WEBHOOK_TOKEN = 'a-long-random-string';
+
+const LOCAL_MAIL_DRIVER = 'smtp';
+const LOCAL_MAIL_FROM = 'no-reply@your-domain.com';
+const LOCAL_SMTP_HOST = 'smtp.postmarkapp.com';
+const LOCAL_SMTP_PORT = 587;
+const LOCAL_SMTP_USER = '...';
+const LOCAL_SMTP_PASS = '...';
+
+const LOCAL_CRON_TOKEN = 'a-long-random-string';

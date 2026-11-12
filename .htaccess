@@ -1,0 +1,17 @@
+# ---- Rethread: Apache rules ----
+Options -Indexes
+
+# Never serve config, internals, backups, scripts or docs.
+<FilesMatch "^(config\.php|config\.local\.php|config\.local\.php\.example|README\.md|DEPLOY\.md|\.env.*|\.git.*)$">
+  Require all denied
+</FilesMatch>
+RedirectMatch 403 ^/?(.*/)?(inc|scripts|backups)(/|$)
+
+# Uploaded photos: cache for a long time (file names are random and never reused).
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType image/webp "access plus 1 year"
+  ExpiresByType image/jpeg "access plus 1 year"
+  ExpiresByType text/css "access plus 1 week"
+  ExpiresByType application/javascript "access plus 1 week"
+</IfModule>
