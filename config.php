@@ -82,3 +82,26 @@ define('UPLOAD_DIR', __DIR__ . '/uploads');
 define('MAX_UPLOAD_BYTES', 12 * 1024 * 1024);
 define('MAX_PHOTOS', 8);
 define('PHOTO_MAX_EDGE', 1600);
+define('THUMB_MAX_EDGE', cfg('THUMB_MAX_EDGE', 480));   // small copy used in grids, chats and lists
+
+// ---- Photo storage ----
+// 'local' keeps photos in uploads/. 's3' stores them in an S3-compatible bucket
+// (AWS S3, Cloudflare R2, DigitalOcean Spaces, Backblaze B2...). See DEPLOY.md.
+define('STORAGE_DRIVER', cfg('STORAGE_DRIVER', 'local'));
+define('S3_BUCKET', cfg('S3_BUCKET', ''));
+define('S3_REGION', cfg('S3_REGION', 'us-east-1'));      // 'auto' for Cloudflare R2
+define('S3_KEY', cfg('S3_KEY', ''));
+define('S3_SECRET', cfg('S3_SECRET', ''));
+define('S3_ENDPOINT', cfg('S3_ENDPOINT', ''));          // empty for AWS; e.g. https://<account>.r2.cloudflarestorage.com
+// Public base URL photos are served from, e.g. your CDN: https://cdn.example.com
+// Empty = served by this site (local) or straight from the bucket (s3).
+define('MEDIA_URL', rtrim(cfg('MEDIA_URL', ''), '/'));
+
+// ---- Push notifications (Web Push) ----
+// Generate a key pair once with: php scripts/vapid_keys.php
+define('VAPID_PUBLIC_KEY', cfg('VAPID_PUBLIC_KEY', ''));
+define('VAPID_PRIVATE_KEY', cfg('VAPID_PRIVATE_KEY', ''));
+
+// ---- Error monitoring ----
+// Paste a Sentry DSN (https://<key>@<host>/<project>) to receive PHP and browser errors.
+define('SENTRY_DSN', cfg('SENTRY_DSN', ''));

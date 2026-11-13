@@ -85,6 +85,9 @@ function order_release(int $id, string $who, string $note = ''): void
     $extra = $note !== '' ? ' Note: ' . $note : '';
     notify((int)$o['seller_id'], 'Order #' . $id . ' is complete. ' . money($payout) . ($o['payment_mode'] === 'stripe' ? ' is on its way to your bank via Stripe.' : ' was added to your wallet.') . $extra, 'wallet.php');
     if ($who !== 'buyer') notify((int)$o['buyer_id'], 'Order #' . $id . ' is complete and the seller has been paid.' . $extra, 'order.php?id=' . $id);
+    // Ask both sides for a review (in-app only; the completion email above is enough email).
+    notify((int)$o['buyer_id'], 'How was your order #' . $id . '? Leave the seller a review.', 'order.php?id=' . $id . '#review', false);
+    notify((int)$o['seller_id'], 'Rate the buyer of order #' . $id . '.', 'order.php?id=' . $id . '#review', false);
 }
 
 /** Cancels and refunds the buyer in full. $relist puts the items back on sale (otherwise hidden). */

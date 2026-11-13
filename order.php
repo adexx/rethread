@@ -39,17 +39,21 @@ if (is_post()) {
         } elseif ($act === 'cancel' && in_array($st, ['paid', 'label_sent'], true)) {
             order_refund($id, true, $isSeller ? 'seller' : 'buyer');
             flash('Order canceled.' . ($isSeller ? '' : ' Your payment is being refunded.'));
+        } elseif ($act === 'review') {
+            review_submit($o, (int)$u['id'], (int)($_POST['rating'] ?? 0), (string)($_POST['body'] ?? ''));
+            flash('Thanks for your review!');
         } elseif (!$isSeller && $act === 'abandon' && $st === 'pending_payment') {
             redirect('checkout_cancel.php?order=' . $id);
         }
     } catch (Throwable $e) {
-        error_log('Order ' . $id . ' action ' . $act . ': ' . $e->getMessage());
+        if (!($e instanceof RuntimeException)) monitor_capture($e, ['order' => (string)$id, 'action' => $act]);
+        else error_log('Order ' . $id . ' action ' . $act . ': ' . $e->getMessage());
         flash($e instanceof StripeError || $e instanceof ShippoError || $e instanceof RuntimeException ? $e->getMessage() : 'Something went wrong. Please try again.', 'err');
     }
     redirect('order.php?id=' . $id);
 }
 
-$lines = q('SELECT oi.*, (SELECT p.path FROM item_photos p WHERE p.item_id = oi.item_id ORDER BY p.sort LIMIT 1) AS photo FROM order_items oi WHERE oi.order_id = ?', [$id])->fetchAll();
+$lines = q('SELECT oi.*, (SELECT COALESCE(p.thumb, p.path) FROM item_photos p WHERE p.item_id = oi.item_id ORDER BY p.sort LIMIT 1) AS photo FROM order_items oi WHERE oi.order_id = ?', [$id])->fetchAll();
 $carrier = CARRIERS[$o['carrier']] ?? CARRIERS['usps'];
 $isPickup = $o['delivery_type'] === 'pickup';
 $steps = $isPickup
@@ -58,6 +62,8 @@ $steps = $isPickup
 $reached = array_search($o['status'], array_keys($steps), true);
 if ($o['status'] === 'suspended') $reached = array_search($o['delivered_at'] ? 'delivered' : ($o['at_point_at'] ? 'at_pickup' : ($o['shipped_at'] ? 'shipped' : 'label_sent')), array_keys($steps), true);
 $dropoffs = ($isSeller && in_array($o['status'], ['paid', 'label_sent'], true)) ? points_near($u, 'dropoff', 3) : [];
+$orderReviews = $o['status'] === 'completed' ? q('SELECT r.*, u.username FROM reviews r JOIN users u ON u.id = r.reviewer_id WHERE r.order_id = ? ORDER BY r.id', [$id])->fetchAll() : [];
+$canReview = can_review($o, (int)$u['id']);
 $autoAt = $o['delivered_at'] ? strtotime($o['delivered_at']) + PAYMENT_HOLD_HOURS * 3600 : null;
 
 page_start('Order #' . $id, ['back' => 'orders.php?side=' . ($isSeller ? 'sold' : 'bought'), 'tab' => 'profile']);
@@ -150,6 +156,30 @@ page_start('Order #' . $id, ['back' => 'orders.php?side=' . ($isSeller ? 'sold' 
     </details>
   <?php endif; ?>
 </div>
+
+<?php if ($o['status'] === 'completed'): ?>
+  <h2 class="section-title flush" id="review">Reviews</h2>
+  <?php foreach ($orderReviews as $r): ?>
+    <div class="review">
+      <div class="review-head"><span class="grow"><?= (int)$r['reviewer_id'] === (int)$u['id'] ? 'You' : e($r['username']) ?> rated <?= (int)$r['reviewer_id'] === (int)$u['id'] ? e($other['username']) : 'you' ?></span><?= stars((float)$r['rating'], 1, false) ?></div>
+      <?php if ($r['body'] !== ''): ?><p><?= e($r['body']) ?></p><?php endif; ?>
+      <?php if ($r['hidden']): ?><p class="muted small">Hidden by our moderators.</p><?php endif; ?>
+    </div>
+  <?php endforeach; ?>
+  <?php if ($canReview): ?>
+    <form method="post" class="pad">
+      <?= csrf_field() ?><input type="hidden" name="action" value="review">
+      <p style="margin:0 0 4px">How was <?= $isSeller ? 'this buyer' : 'your purchase from ' . e($other['username']) ?>?</p>
+      <div class="rate" role="radiogroup" aria-label="Rating">
+        <?php for ($n = 5; $n >= 1; $n--): ?><input type="radio" id="rate<?= $n ?>" name="rating" value="<?= $n ?>" required><label for="rate<?= $n ?>" title="<?= $n ?> star<?= $n > 1 ? 's' : '' ?>">★</label><?php endfor; ?>
+      </div>
+      <label class="field"><span>Comment (optional, shown on <?= e($other['username']) ?>'s profile)</span><textarea class="input" name="body" maxlength="1000" placeholder="<?= $isSeller ? 'e.g. Paid quickly, friendly messages' : 'e.g. Fast shipping, exactly as described' ?>"></textarea></label>
+      <button class="btn btn-primary">Post review</button>
+    </form>
+  <?php elseif (!$orderReviews): ?>
+    <p class="pad muted small" style="margin:0">Reviews can be left for <?= REVIEW_WINDOW_DAYS ?> days after an order completes.</p>
+  <?php endif; ?>
+<?php endif; ?>
 
 <h2 class="section-title flush">Delivery details</h2>
 <div class="box">

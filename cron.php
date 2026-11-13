@@ -14,7 +14,7 @@ if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) exit("Already running\n");
 
 $log = function (string $m) { echo date('Y-m-d H:i:s') . ' ' . $m . "\n"; };
 $safely = function (string $name, callable $job) use ($log) {
-    try { $job(); } catch (Throwable $e) { $log("$name failed: " . $e->getMessage()); error_log("cron $name: " . $e); }
+    try { $job(); } catch (Throwable $e) { $log("$name failed: " . $e->getMessage()); monitor_capture($e, ['cron' => $name]); }
 };
 
 // 1. Abandoned checkouts: release items held more than 35 minutes (Stripe also sends checkout.session.expired).
@@ -77,12 +77,23 @@ $safely('email', function () use ($log) {
     if ($ok || $bad) $log("emails sent=$ok failed=$bad");
 });
 
+// Saved-search alerts and push notifications.
+$safely('saved_searches', function () use ($log) {
+    $n = run_saved_search_alerts();
+    if ($n) $log("saved-search alerts=$n");
+});
+$safely('push', function () use ($log) {
+    [$ok, $bad] = send_push_queue();
+    if ($ok || $bad) $log("push sent=$ok failed=$bad");
+});
+
 // 5. Housekeeping.
 $safely('cleanup', function () {
     q('DELETE FROM login_attempts WHERE created_at < NOW() - INTERVAL 30 DAY');
     q('DELETE FROM tokens WHERE expires_at < NOW() - INTERVAL 7 DAY');
     q('DELETE FROM webhook_events WHERE created_at < NOW() - INTERVAL 60 DAY');
     q("DELETE FROM emails WHERE created_at < NOW() - INTERVAL 90 DAY AND status IN ('sent','logged')");
+    q("DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at < NOW() - INTERVAL 180 DAY");
 });
 
 q("INSERT INTO settings (k, v) VALUES ('cron_last_run', ?) ON DUPLICATE KEY UPDATE v = VALUES(v)", [(string)time()]);

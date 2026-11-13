@@ -15,6 +15,7 @@ if (!$error && in_array((int)$u['id'], $sellerIds, true)) $error = "You can't bu
 if (!$error) foreach ($items as $it) if ($it['status'] !== 'active') $error = '"' . $it['title'] . '" is no longer available.';
 $seller = $items ? q('SELECT * FROM users WHERE id = ?', [$items[0]['user_id']])->fetch() : null;
 if (!$error && ($seller['vacation_mode'] || $seller['banned'] || $seller['deleted_at'])) $error = 'This seller is not selling right now.';
+if (!$error && is_blocked_between((int)$u['id'], (int)$seller['id'])) $error = "You can't buy from this member.";
 if (!$error && stripe_enabled() && (!$seller['payouts_enabled'] || !$seller['stripe_account_id'])) $error = "This seller hasn't finished setting up payouts yet, so their items can't be bought right now.";
 if ($error) { flash($error, 'err'); redirect(count($ids) === 1 ? 'item.php?id=' . $ids[0] : 'member.php?id=' . ($seller['id'] ?? 0)); }
 

@@ -22,6 +22,13 @@ $checks = [
         ['Installer removed from the server', !$installExists || IS_PRODUCTION, 'Delete install.php after setup (it is blocked in production, but removing it is safer).'],
         ['Uploads folder writable', is_writable(UPLOAD_DIR), 'The web server must be able to write to uploads/.'],
     ],
+    'Growth & reliability' => [
+        ['Photos stored off the server (S3/R2) or a CDN set', storage_is_s3() || MEDIA_URL !== '', 'Set STORAGE_DRIVER=s3 and the S3_* settings, and ideally MEDIA_URL to a CDN. Needed before running more than one web server.'],
+        ['Push notifications set up', push_enabled(), 'Run php scripts/vapid_keys.php and add the two keys to config.local.php or the environment.'],
+        ['Error monitoring connected', SENTRY_DSN !== '', 'Create a free Sentry project and set SENTRY_DSN, so you hear about errors before members do.'],
+        ['Thumbnails made for all photos', !(int)q("SELECT COUNT(*) FROM item_photos WHERE thumb IS NULL AND path LIKE 'uploads/%'")->fetchColumn(), 'Run php scripts/make_thumbs.php once.'],
+        ['No open reports older than 2 days', !(int)q("SELECT COUNT(*) FROM reports WHERE status = 'open' AND created_at < NOW() - INTERVAL 2 DAY")->fetchColumn(), 'See Reports.'],
+    ],
     'Payments & shipping' => [
         ['Stripe connected', stripe_enabled(), 'Set STRIPE_SECRET_KEY (start with sk_test_…).'],
         ['Stripe in live mode', stripe_enabled() && !stripe_is_test(), 'Switch to sk_live_… keys only after testing the whole flow in test mode.'],

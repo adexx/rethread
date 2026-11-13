@@ -57,4 +57,19 @@ page_start('Settings', ['back' => $hasNext ? $next : 'profile.php', 'tab' => 'pr
     <span class="switch"><input type="checkbox" name="email_notifications" value="1" <?= $f['email_notifications'] ? 'checked' : '' ?>><span></span></span></label>
   <button class="btn btn-primary">Save</button>
 </form>
+
+<?php if (push_enabled()): ?>
+<h2 class="section-title flush">Push notifications</h2>
+<div class="pad" style="padding-top:0" id="push-box" data-vapid="<?= e(VAPID_PUBLIC_KEY) ?>" data-csrf="<?= e(csrf_token()) ?>">
+  <p class="muted" id="push-status" style="margin-top:0">Get messages, offers and order updates on this device, even when <?= e(APP_NAME) ?> is closed.</p>
+  <button type="button" class="btn btn-outline" id="push-toggle" hidden>Turn on for this device</button>
+</div>
+<?php elseif (is_admin()): ?>
+<p class="pad muted small">Push notifications are off for this site. Generate keys with <code>php scripts/vapid_keys.php</code> (see DEPLOY.md).</p>
+<?php endif; ?>
+
+<h2 class="section-title flush">Privacy and safety</h2>
+<nav class="menu">
+  <a href="blocked.php"><?= icon('lock', 26) ?><span>Blocked members</span><span class="push"></span><span class="mi-chev"><?= icon('chevron') ?></span></a>
+</nav>
 <?php page_end();

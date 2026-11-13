@@ -2,6 +2,7 @@
 require __DIR__ . '/inc/app.php';
 $u = user();
 $favs = user_favorites();
+$followFeed = $u ? following_feed((int)$u['id'], 4) : [];
 $newest = item_list(" WHERE i.status = 'active' AND u.vacation_mode = 0 AND u.banned = 0", [], 'i.sort_at DESC, i.id DESC', 24);
 
 page_start(APP_NAME, ['tab' => 'home', 'header' => false]);
@@ -17,11 +18,16 @@ page_start(APP_NAME, ['tab' => 'home', 'header' => false]);
     <a class="btn btn-ghost" style="width:auto" href="login.php">Log in</a>
   </section>
 <?php endif; ?>
+<div id="install-slot"></div>
 <div class="top-cats" style="margin-top:12px">
   <?php foreach (category_children(null) as $c): ?>
     <a href="browse.php?cat=<?= (int)$c['id'] ?>"><?= icon($c['icon'] ?: 'grid', 26) ?><?= e($c['name']) ?></a>
   <?php endforeach; ?>
 </div>
+<?php if ($followFeed): ?>
+  <h2 class="section-title spread">New from members you follow <a class="small accent" href="following.php">See all</a></h2>
+  <div class="grid"><?php foreach ($followFeed as $it) echo item_card($it, $favs); ?></div>
+<?php endif; ?>
 <h2 class="section-title">Newest items</h2>
 <?php if ($newest): ?>
   <div class="grid"><?php foreach ($newest as $it) echo item_card($it, $favs); ?></div>

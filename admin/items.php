@@ -24,9 +24,7 @@ if (is_post()) {
             admin_log('restore_listing', 'item', $iid, $it['title']);
             $done++;
         } elseif ($act === 'delete' && $it['status'] !== 'sold' && !q('SELECT 1 FROM order_items WHERE item_id = ?', [$iid])->fetchColumn()) {
-            foreach (q('SELECT path FROM item_photos WHERE item_id = ?', [$iid])->fetchAll(PDO::FETCH_COLUMN) as $p) {
-                if (strpos($p, 'uploads/') === 0 && is_file(__DIR__ . '/../' . $p)) unlink(__DIR__ . '/../' . $p);
-            }
+            delete_item_photo_files($iid);
             q('DELETE FROM items WHERE id = ?', [$iid]);
             admin_log('delete_listing', 'item', $iid, $it['title']);
             $done++;

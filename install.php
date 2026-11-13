@@ -28,7 +28,7 @@ $pdo->exec("SET time_zone = '" . date('P') . "'");
 $pdo->exec('CREATE DATABASE IF NOT EXISTS `' . DB_NAME . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
 $pdo->exec('USE `' . DB_NAME . '`');
 
-$tables = ['pudo_events', 'webhook_events', 'emails', 'login_attempts', 'tokens', 'admin_log', 'settings', 'notifications', 'messages', 'conversations', 'order_items', 'orders', 'pickup_points', 'favorites', 'item_photos', 'items', 'categories', 'users'];
+$tables = ['push_queue', 'push_subscriptions', 'saved_searches', 'follows', 'blocks', 'reports', 'reviews', 'pudo_events', 'webhook_events', 'emails', 'login_attempts', 'tokens', 'admin_log', 'settings', 'notifications', 'messages', 'conversations', 'order_items', 'orders', 'pickup_points', 'favorites', 'item_photos', 'items', 'categories', 'users'];
 if ($reset) {
     $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
     foreach ($tables as $t) $pdo->exec("DROP TABLE IF EXISTS `$t`");
@@ -348,6 +348,126 @@ foreach ($perfIdx as [$table, $name, $def]) {
 }
 if ($newIdx) say("Added $newIdx performance indexes (feed, categories, prices, search).");
 
+// ---- Community, alerts and notifications ----
+$pdo->exec(<<<SQL
+CREATE TABLE IF NOT EXISTS reviews (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  order_id INT NOT NULL,
+  reviewer_id INT NOT NULL,
+  reviewee_id INT NOT NULL,
+  role ENUM('buyer','seller') NOT NULL,          -- what the reviewer was in this order
+  rating TINYINT UNSIGNED NOT NULL,
+  body VARCHAR(1000) NOT NULL DEFAULT '',
+  hidden TINYINT(1) NOT NULL DEFAULT 0,          -- hidden by an admin
+  created_at DATETIME NOT NULL,
+  UNIQUE KEY uq_review (order_id, reviewer_id),
+  INDEX idx_reviewee (reviewee_id, hidden, created_at),
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (reviewee_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS reports (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  reporter_id INT NOT NULL,
+  target_type ENUM('item','user','message','review') NOT NULL,
+  target_id INT NOT NULL,
+  reason VARCHAR(60) NOT NULL,
+  details VARCHAR(1000) NOT NULL DEFAULT '',
+  status ENUM('open','resolved','dismissed') NOT NULL DEFAULT 'open',
+  resolved_by INT NULL,
+  resolved_note VARCHAR(255) NOT NULL DEFAULT '',
+  resolved_at DATETIME NULL,
+  created_at DATETIME NOT NULL,
+  UNIQUE KEY uq_report (reporter_id, target_type, target_id),
+  INDEX idx_status (status, created_at),
+  INDEX idx_target (target_type, target_id),
+  FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS blocks (
+  blocker_id INT NOT NULL,
+  blocked_id INT NOT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (blocker_id, blocked_id),
+  INDEX idx_blocked (blocked_id),
+  FOREIGN KEY (blocker_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (blocked_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS follows (
+  follower_id INT NOT NULL,
+  followed_id INT NOT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (follower_id, followed_id),
+  INDEX idx_followed (followed_id),
+  FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (followed_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS saved_searches (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  label VARCHAR(160) NOT NULL,
+  filters VARCHAR(2000) NOT NULL,                -- JSON of the catalog filters
+  last_item_id INT NOT NULL DEFAULT 0,           -- newest listing already alerted on
+  checked_at DATETIME NULL,
+  created_at DATETIME NOT NULL,
+  INDEX idx_user (user_id),
+  INDEX idx_checked (checked_at),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  endpoint VARCHAR(1000) NOT NULL,
+  endpoint_hash CHAR(64) NOT NULL,
+  p256dh VARCHAR(200) NOT NULL,
+  auth VARCHAR(60) NOT NULL,
+  created_at DATETIME NOT NULL,
+  UNIQUE KEY uq_endpoint (endpoint_hash),
+  INDEX idx_user (user_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS push_queue (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  title VARCHAR(120) NOT NULL,
+  body VARCHAR(300) NOT NULL,
+  url VARCHAR(500) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL,
+  INDEX idx_created (created_at)
+) ENGINE=InnoDB;
+SQL);
+$cols2 = [
+    'users' => ['rating_avg' => 'DECIMAL(3,2) NULL', 'rating_count' => 'INT NOT NULL DEFAULT 0', 'follower_count' => 'INT NOT NULL DEFAULT 0'],
+    'messages' => ['flagged' => 'TINYINT(1) NOT NULL DEFAULT 0'],
+    'conversations' => ['last_message_id' => 'INT NULL'],
+    'item_photos' => ['thumb' => 'VARCHAR(255) NULL'],
+];
+$added2 = 0;
+foreach ($cols2 as $table => $defs) {
+    foreach ($defs as $col => $def) {
+        if (!$hasCol($table, $col)) { $pdo->exec("ALTER TABLE `$table` ADD `$col` $def"); $added2++; }
+    }
+}
+foreach ([
+    ['messages', 'idx_unread', 'INDEX idx_unread (conversation_id, read_at, sender_id)'],
+    ['messages', 'idx_flagged', 'INDEX idx_flagged (flagged, id)'],
+    ['conversations', 'idx_buyer_recent', 'INDEX idx_buyer_recent (buyer_id, updated_at)'],
+    ['conversations', 'idx_seller_recent', 'INDEX idx_seller_recent (seller_id, updated_at)'],
+    ['notifications', 'idx_user_unread', 'INDEX idx_user_unread (user_id, read_at)'],
+] as [$table, $name, $def]) {
+    if (!$hasIdx($table, $name)) { $pdo->exec("ALTER TABLE `$table` ADD $def"); $added2++; }
+}
+if ($added2) say("Added $added2 columns and indexes for reviews, follows, inbox and photos.");
+$backfill_conversations = function (PDO $pdo): void {
+    $pdo->exec('UPDATE conversations c SET last_message_id = (SELECT MAX(m.id) FROM messages m WHERE m.conversation_id = c.id) WHERE c.last_message_id IS NULL');
+};
+$backfill_conversations($pdo);
+
 // ---- Admin account (test credentials, see README) ----
 if (!$pdo->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn()
     && !$pdo->query("SELECT COUNT(*) FROM users WHERE email = 'admin@example.com'")->fetchColumn()) {
@@ -361,6 +481,7 @@ if ((int)$pdo->query("SELECT COUNT(*) FROM users WHERE role <> 'admin'")->fetchC
     say('Data already present: skipped seeding. Use ?reset=1 (or --reset) to rebuild.');
 } else {
     seed($pdo);
+    $backfill_conversations($pdo);
 }
 
 function seed(PDO $pdo): void
@@ -588,6 +709,23 @@ function seed(PDO $pdo): void
                 pickup_deadline = NOW() + INTERVAL 6 DAY WHERE id = 2");
     $pdo->exec("INSERT INTO pudo_events (point_id, order_id, type, user_id, created_at) VALUES (1, 2, 'received', $shopUser, NOW() - INTERVAL 1 DAY)");
     $pdo->exec("UPDATE orders SET paid_at = created_at WHERE status <> 'pending_payment'");
+
+    // ---- Reviews, follows and a saved search ----
+    $done = (int)$pdo->query("SELECT id FROM orders WHERE status = 'completed' ORDER BY id LIMIT 1")->fetchColumn();
+    if ($done) {
+        $pdo->exec("UPDATE orders SET completed_at = NOW() - INTERVAL 2 HOUR WHERE id = $done");
+        $rv = $pdo->prepare('INSERT INTO reviews (order_id, reviewer_id, reviewee_id, role, rating, body, created_at) VALUES (?,?,?,?,?,?, NOW() - INTERVAL 1 HOUR)');
+        $rv->execute([$done, $uid['jordanlee'], $uid['golfpro_dan'], 'buyer', 5, 'Fast shipping and exactly as described. Thanks!']);
+        $rv->execute([$done, $uid['golfpro_dan'], $uid['jordanlee'], 'seller', 5, 'Quick payment, easy pick-up. Great buyer.']);
+    }
+    $pdo->exec('UPDATE users u SET rating_count = (SELECT COUNT(*) FROM reviews r WHERE r.reviewee_id = u.id AND r.hidden = 0),
+                rating_avg = (SELECT AVG(r.rating) FROM reviews r WHERE r.reviewee_id = u.id AND r.hidden = 0)');
+    $fw = $pdo->prepare('INSERT IGNORE INTO follows (follower_id, followed_id, created_at) VALUES (?, ?, NOW())');
+    foreach (['sam_thrift', 'bookworm_kate'] as $un) $fw->execute([$uid['demo'], $uid[$un]]);
+    $fw->execute([$uid['maria.closet'], $uid['demo']]);
+    $pdo->exec('UPDATE users u SET follower_count = (SELECT COUNT(*) FROM follows f WHERE f.followed_id = u.id)');
+    $pdo->prepare("INSERT INTO saved_searches (user_id, label, filters, last_item_id, checked_at, created_at) VALUES (?, 'jeans', '{\"q\":\"jeans\"}', (SELECT COALESCE(MAX(id), 0) FROM items), NOW(), NOW())")
+        ->execute([$uid['demo']]);
     say('Seeded ' . count($catIds) . ' categories, ' . count($users) . ' users, ' . count($items) . ' items, orders and messages.');
     say('Demo login: demo@example.com / demo1234 (other seed users use password123).');
 }

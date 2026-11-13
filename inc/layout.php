@@ -1,11 +1,15 @@
 <?php
 /**
  * page_start(title, opts): opts = ['tab' => home|browse|sell|inbox|profile|null, 'back' => url|true|null,
- *                                  'right' => html, 'nav' => bool, 'header' => bool, 'class' => string]
+ *                                  'right' => html, 'nav' => bool, 'header' => bool, 'class' => string,
+ *                                  'meta' => ['description', 'image', 'type', 'canonical', 'jsonld' => array], 'noindex' => bool]
  */
 function page_start(string $title, array $o = []): void
 {
-    $o += ['tab' => null, 'back' => null, 'right' => '', 'nav' => true, 'header' => true, 'class' => '', 'close' => false];
+    $o += ['tab' => null, 'back' => null, 'right' => '', 'nav' => true, 'header' => true, 'class' => '', 'close' => false, 'meta' => [], 'noindex' => false];
+    $meta = $o['meta'] + ['description' => 'Buy and sell second-hand fashion, books and more on ' . APP_NAME . '. Buyer Protection on every order.',
+                          'image' => app_url('assets/icons/og-default.png'), 'type' => 'website', 'canonical' => '', 'jsonld' => null];
+    $pageTitle = $title === APP_NAME ? APP_NAME : $title . ' · ' . APP_NAME;
     $GLOBALS['__nav'] = $o['nav'];
     $GLOBALS['__tab'] = $o['tab'];
     $f = flash();
@@ -15,9 +19,38 @@ function page_start(string $title, array $o = []): void
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#16191c">
-<title><?= e($title) ?> · <?= e(APP_NAME) ?></title>
+<title><?= e($pageTitle) ?></title>
+<meta name="description" content="<?= e(mb_strimwidth($meta['description'], 0, 160, '…')) ?>">
+<?php if ($o['noindex']): ?><meta name="robots" content="noindex"><?php endif; ?>
+<?php if ($meta['canonical']): ?><link rel="canonical" href="<?= e($meta['canonical']) ?>"><?php endif; ?>
+<meta property="og:site_name" content="<?= e(APP_NAME) ?>">
+<meta property="og:title" content="<?= e($title) ?>">
+<meta property="og:description" content="<?= e(mb_strimwidth($meta['description'], 0, 200, '…')) ?>">
+<meta property="og:type" content="<?= e($meta['type']) ?>">
+<?php if ($meta['canonical']): ?><meta property="og:url" content="<?= e($meta['canonical']) ?>"><?php endif; ?>
+<meta property="og:image" content="<?= e(abs_url($meta['image'])) ?>">
+<meta name="twitter:card" content="summary_large_image">
+<?php if ($meta['jsonld']): ?><script type="application/ld+json"><?= json_encode($meta['jsonld'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG) ?></script><?php endif; ?>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23f2a65a'/><text x='16' y='23' font-size='19' font-family='Arial' font-weight='700' text-anchor='middle' fill='%2316191c'>r</text></svg>">
-<link rel="stylesheet" href="assets/style.css?v=4">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="assets/style.css?v=5">
+<?php if (SENTRY_DSN !== ''): ?>
+<script>
+// Browser errors go to Sentry through js_error.php (at most 5 per page).
+(function () {
+  var sent = 0;
+  function report(msg, src, line, col, stack) {
+    if (sent++ >= 5 || !navigator.sendBeacon) return;
+    navigator.sendBeacon('js_error.php', JSON.stringify({ message: String(msg).slice(0, 500), source: String(src || '').slice(0, 300), line: line || 0, col: col || 0, stack: String(stack || '').slice(0, 3000), page: location.pathname }));
+  }
+  window.addEventListener('error', function (e) { report(e.message, e.filename, e.lineno, e.colno, e.error && e.error.stack); });
+  window.addEventListener('unhandledrejection', function (e) { var r = e.reason || {}; report(r.message || r, '', 0, 0, r.stack); });
+})();
+</script>
+<?php endif; ?>
 </head>
 <body class="<?= e($o['class']) ?><?= $o['nav'] ? ' has-nav' : '' ?>">
 <div class="app">
@@ -59,7 +92,13 @@ function page_end(): void
         }
         echo '</nav>';
     }
-    echo "</div>\n<script src=\"assets/app.js?v=4\"></script>\n</body>\n</html>";
+    echo "</div>\n<script src=\"assets/app.js?v=5\"></script>\n</body>\n</html>";
+}
+
+/** Absolute URL for links shared outside the site (previews, sitemaps, emails). */
+function abs_url(string $u): string
+{
+    return preg_match('#^https?://#i', $u) ? $u : app_url($u);
 }
 
 function item_card(array $it, array $favs): string

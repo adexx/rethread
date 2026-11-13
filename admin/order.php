@@ -53,7 +53,7 @@ if (is_post()) {
 
 $buyer = q('SELECT * FROM users WHERE id = ?', [$o['buyer_id']])->fetch();
 $seller = q('SELECT * FROM users WHERE id = ?', [$o['seller_id']])->fetch();
-$lines = q('SELECT oi.*, i.status item_status, (SELECT p.path FROM item_photos p WHERE p.item_id = oi.item_id ORDER BY p.sort LIMIT 1) photo
+$lines = q('SELECT oi.*, i.status item_status, (SELECT COALESCE(p.thumb, p.path) FROM item_photos p WHERE p.item_id = oi.item_id ORDER BY p.sort LIMIT 1) photo
             FROM order_items oi JOIN items i ON i.id = oi.item_id WHERE oi.order_id = ?', [$id])->fetchAll();
 $point = $o['pickup_point_id'] ? q('SELECT * FROM pickup_points WHERE id = ?', [$o['pickup_point_id']])->fetch() : null;
 $conv = q('SELECT c.id FROM conversations c JOIN order_items oi ON oi.item_id = c.item_id WHERE oi.order_id = ? AND c.buyer_id = ? LIMIT 1', [$id, $o['buyer_id']])->fetchColumn();

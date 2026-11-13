@@ -77,7 +77,7 @@ if (is_post()) {
             // Keep orders (needed for accounting and tax records) but strip personal data from the account.
             $pdo = db();
             $pdo->beginTransaction();
-            foreach (q('SELECT p.path FROM item_photos p JOIN items i ON i.id = p.item_id WHERE i.user_id = ?', [$id])->fetchAll(PDO::FETCH_COLUMN) as $p) delete_photo_file($p);
+            foreach (q('SELECT p.path, p.thumb FROM item_photos p JOIN items i ON i.id = p.item_id WHERE i.user_id = ?', [$id])->fetchAll() as $p) delete_photo_file($p);
             q("DELETE p FROM item_photos p JOIN items i ON i.id = p.item_id WHERE i.user_id = ?", [$id]);
             q("UPDATE items SET status = 'hidden', description = '' WHERE user_id = ? AND status <> 'sold'", [$id]);
             q('DELETE FROM favorites WHERE user_id = ?', [$id]);

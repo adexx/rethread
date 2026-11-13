@@ -18,12 +18,15 @@ if (!$conv) {
 $isSeller = (int)$item['user_id'] === (int)$u['id'];
 $otherId = $conv ? (int)($isSeller ? $conv['buyer_id'] : $conv['seller_id']) : (int)$item['user_id'];
 $other = q('SELECT * FROM users WHERE id = ?', [$otherId])->fetch();
+$blocked = is_blocked_between((int)$u['id'], $otherId);
+$iBlocked = $blocked && has_blocked((int)$u['id'], $otherId);
 
 if (is_post()) {
     check_csrf();
     if (empty($u['email_verified_at'])) { flash('Confirm your email before sending messages.', 'err'); redirect('verify.php'); }
     if (rate_limited('message', (string)$u['id'], 30, 10)) { flash("You're sending messages too fast. Please wait a few minutes.", 'err'); redirect($_SERVER['REQUEST_URI'] ?? 'inbox.php'); }
     record_attempt('message', (string)$u['id'], false);
+    if ($blocked) { flash($iBlocked ? 'You blocked this member. Unblock them to send messages.' : "You can't message this member.", 'err'); redirect($conv ? 'conversation.php?id=' . $conv['id'] : 'item.php?id=' . $itemId); }
     $act = $_POST['action'] ?? 'send';
     $ensureConv = function () use (&$conv, $item, $u) {
         if (!$conv) {
@@ -37,7 +40,10 @@ if (is_post()) {
         $body = trim((string)($_POST['body'] ?? ''));
         if ($body !== '' && mb_strlen($body) <= 2000) {
             $cid = $ensureConv();
-            q('INSERT INTO messages (conversation_id, sender_id, body, created_at) VALUES (?, ?, ?, NOW())', [$cid, $u['id'], $body]);
+            $risk = message_risk($body);
+            add_message($cid, (int)$u['id'], $body, null, null, $risk ? 1 : 0);
+            queue_push($otherId, $u['username'], mb_strimwidth($body, 0, 140, '…'), 'conversation.php?id=' . $cid);
+            if ($risk) flash('Heads up: for your safety, keep chats and payments on ' . APP_NAME . '. Payments made elsewhere aren\'t covered by Buyer Protection.', 'err');
         }
     } elseif ($act === 'offer') {
         $amt = round((float)($_POST['amount'] ?? 0), 2);
@@ -46,8 +52,7 @@ if (is_post()) {
         else {
             $cid = $ensureConv();
             q("UPDATE messages SET offer_status = 'declined' WHERE conversation_id = ? AND offer_status = 'pending'", [$cid]);
-            q("INSERT INTO messages (conversation_id, sender_id, body, offer_amount, offer_status, created_at) VALUES (?, ?, ?, ?, 'pending', NOW())",
-              [$cid, $u['id'], 'Offer: ' . money($amt), $amt]);
+            add_message($cid, (int)$u['id'], 'Offer: ' . money($amt), $amt, 'pending');
             notify($otherId, $u['username'] . ' sent an offer of ' . money($amt) . ' for "' . $item['title'] . '".', 'conversation.php?id=' . $cid);
         }
     } elseif (in_array($act, ['accept', 'decline'], true) && $conv) {
@@ -55,7 +60,7 @@ if (is_post()) {
         if ($m) {
             q('UPDATE messages SET offer_status = ? WHERE id = ?', [$act === 'accept' ? 'accepted' : 'declined', $m['id']]);
             $txt = $act === 'accept' ? 'Offer accepted! You can now buy it for ' . money($m['offer_amount']) . '.' : 'Offer of ' . money($m['offer_amount']) . ' declined.';
-            q('INSERT INTO messages (conversation_id, sender_id, body, created_at) VALUES (?, ?, ?, NOW())', [$conv['id'], $u['id'], $txt]);
+            add_message((int)$conv['id'], (int)$u['id'], $txt);
             notify((int)$m['sender_id'], $u['username'] . ($act === 'accept' ? ' accepted' : ' declined') . ' your offer for "' . $item['title'] . '".', 'conversation.php?id=' . $conv['id']);
         }
     }
@@ -73,7 +78,20 @@ $buyerId = $conv ? (int)$conv['buyer_id'] : (int)$u['id'];
 $price = effective_price($item, $buyerId);
 $showOffer = !$isSeller && isset($_GET['offer']) && $item['status'] === 'active';
 
-page_start($other['username'], ['back' => $conv ? 'inbox.php' : 'item.php?id=' . $itemId, 'nav' => false]);
+ob_start(); ?>
+<details class="more-menu">
+  <summary class="iconbtn" aria-label="More actions"><?= icon('dots') ?></summary>
+  <div class="mm-list">
+    <a href="member.php?id=<?= $otherId ?>">View profile</a>
+    <a href="report.php?type=user&id=<?= $otherId ?>">Report <?= e($other['username']) ?></a>
+    <form method="post" action="block.php" style="margin:0"><?= csrf_field() ?><input type="hidden" name="id" value="<?= $otherId ?>"><input type="hidden" name="next" value="<?= e($conv ? 'conversation.php?id=' . $conv['id'] : 'inbox.php') ?>">
+      <?php if ($iBlocked): ?><button name="action" value="unblock">Unblock</button>
+      <?php else: ?><button class="danger" name="action" value="block" data-confirm="Block <?= e($other['username']) ?>? They won't be able to message you or buy from you.">Block</button><?php endif; ?>
+    </form>
+  </div>
+</details>
+<?php $menu = (string)ob_get_clean();
+page_start($other['username'], ['back' => $conv ? 'inbox.php' : 'item.php?id=' . $itemId, 'nav' => false, 'right' => $menu]);
 ?>
 <div class="chat-item">
   <img src="<?= e(photo_url($item['photo'], (string)$item['id'])) ?>" alt="">
@@ -106,10 +124,17 @@ page_start($other['username'], ['back' => $conv ? 'inbox.php' : 'item.php?id=' .
       </div>
     <?php else: ?>
       <div class="bubble<?= $mine ? ' me' : '' ?>"><?= e($m['body']) ?><span class="b-time"><?= e(time_ago($m['created_at'])) ?></span></div>
+      <?php if (!$mine && $m['flagged'] && $risk = message_risk($m['body'])): ?>
+        <div class="warn" role="note"><strong>Be careful.</strong> This message mentions <?= e(implode(', ', $risk)) ?>. Scammers often ask to chat or pay outside <?= e(APP_NAME) ?>. Only pay through the Buy button: payments made anywhere else aren't covered by Buyer Protection.
+          <a href="report.php?type=message&id=<?= (int)$m['id'] ?>">Report this message</a></div>
+      <?php endif; ?>
     <?php endif; ?>
   <?php endforeach; ?>
 </div>
 
+<?php if ($blocked): ?>
+  <p class="pad muted" style="text-align:center"><?= $iBlocked ? 'You blocked ' . e($other['username']) . '. Unblock them from the ⋯ menu to chat again.' : "You can't reply to this conversation." ?></p>
+<?php else: ?>
 <?php if (!$isSeller && $item['status'] === 'active'): ?>
   <details class="pad" style="padding-top:0" <?= $showOffer ? 'open' : '' ?>>
     <summary class="btn btn-outline">Make an offer</summary>
@@ -133,4 +158,5 @@ page_start($other['username'], ['back' => $conv ? 'inbox.php' : 'item.php?id=' .
   <input name="body" placeholder="Write a message..." maxlength="2000" autocomplete="off" required aria-label="Message">
   <button aria-label="Send"><?= icon('send', 20) ?></button>
 </form>
+<?php endif; ?>
 <?php page_end();

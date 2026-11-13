@@ -20,9 +20,7 @@ if (is_post() && $isOwner) {
     if ($act === 'delete' && in_array($item['status'], ['active', 'hidden', 'reserved'], true)) {
         $inOrder = q('SELECT 1 FROM order_items WHERE item_id = ?', [$id])->fetchColumn();
         if ($inOrder) { q("UPDATE items SET status = 'hidden' WHERE id = ?", [$id]); flash('Item has order history, so it was hidden instead.'); redirect('item.php?id=' . $id); }
-        foreach (q('SELECT path FROM item_photos WHERE item_id = ?', [$id])->fetchAll(PDO::FETCH_COLUMN) as $p) {
-            if (strpos($p, 'uploads/') === 0 && is_file(__DIR__ . '/' . $p)) unlink(__DIR__ . '/' . $p);
-        }
+        delete_item_photo_files($id);
         q('DELETE FROM items WHERE id = ?', [$id]);
         flash('Listing deleted.');
         redirect('member.php?id=' . $u['id']);
@@ -40,7 +38,7 @@ if (!$isOwner) {
         $_SESSION['viewed'] = array_slice($seen, -200, null, true);   // keep the session small
     }
 }
-$photos = q('SELECT path FROM item_photos WHERE item_id = ? ORDER BY sort, id', [$id])->fetchAll(PDO::FETCH_COLUMN);
+$photos = array_map('media_url', q('SELECT path FROM item_photos WHERE item_id = ? ORDER BY sort, id', [$id])->fetchAll(PDO::FETCH_COLUMN));
 if (!$photos) $photos = [photo_url(null, (string)$id)];
 $seller = q('SELECT * FROM users WHERE id = ?', [$item['user_id']])->fetch();
 $sellerCount = (int)q("SELECT COUNT(*) FROM items WHERE user_id = ? AND status = 'active'", [$seller['id']])->fetchColumn();
@@ -57,9 +55,24 @@ $favs = user_favorites();
 $isFav = isset($favs[$id]);
 $price = effective_price($item, $u ? (int)$u['id'] : null);
 $offerAccepted = $price !== (float)$item['price'];
-$available = $item['status'] === 'active' && !$seller['vacation_mode'] && !$seller['banned'];
+$blockedPair = $u && !$isOwner && is_blocked_between((int)$u['id'], (int)$seller['id']);
+$available = $item['status'] === 'active' && !$seller['vacation_mode'] && !$seller['banned'] && !$blockedPair;
 
-page_start($item['title'], ['header' => false, 'nav' => false]);
+// Link previews (WhatsApp, Instagram, iMessage…) and Google product results.
+$canonical = app_url('item.php?id=' . $id);
+$jsonld = [
+    '@context' => 'https://schema.org', '@type' => 'Product', 'name' => $item['title'], 'sku' => (string)$id,
+    'image' => array_map('abs_url', array_slice($photos, 0, 4)), 'description' => mb_strimwidth($item['description'], 0, 500, '…'),
+    'itemCondition' => strpos($item['condition_label'], 'New') === 0 ? 'https://schema.org/NewCondition' : 'https://schema.org/UsedCondition',
+    'offers' => ['@type' => 'Offer', 'price' => number_format((float)$item['price'], 2, '.', ''), 'priceCurrency' => 'USD', 'url' => $canonical,
+                 'availability' => $item['status'] === 'active' ? 'https://schema.org/InStock' : 'https://schema.org/SoldOut',
+                 'seller' => ['@type' => 'Person', 'name' => $seller['username']]],
+];
+if ($item['brand'] !== '') $jsonld['brand'] = ['@type' => 'Brand', 'name' => $item['brand']];
+if ((int)$seller['rating_count'] > 0) $jsonld['offers']['seller']['aggregateRating'] = ['@type' => 'AggregateRating', 'ratingValue' => number_format((float)$seller['rating_avg'], 1), 'reviewCount' => (int)$seller['rating_count']];
+page_start($item['title'], ['header' => false, 'nav' => false, 'noindex' => !in_array($item['status'], ['active', 'reserved', 'sold'], true),
+    'meta' => ['description' => money($item['price']) . ' · ' . implode(' · ', array_filter([$item['brand'], $item['size'] !== 'One size' ? 'Size ' . $item['size'] : '', $item['condition_label']])) . '. ' . $item['description'],
+               'image' => $photos[0], 'type' => 'product', 'canonical' => $canonical, 'jsonld' => $jsonld]]);
 ?>
 <div class="gallery">
   <div class="gallery-track">
@@ -130,6 +143,7 @@ page_start($item['title'], ['header' => false, 'nav' => false]);
   <?= avatar($seller, 48) ?>
   <div style="flex:1">
     <div style="font-size:18px"><?= e($seller['username']) ?></div>
+    <?= stars($seller['rating_avg'] !== null ? (float)$seller['rating_avg'] : null, (int)$seller['rating_count']) ?>
     <div class="muted small"><?= $sellerCount ?> listing<?= $sellerCount === 1 ? '' : 's' ?> · <?= $sellerSold ?> sold<?= $seller['bundle_enabled'] ? ' · Bundle discounts' : '' ?></div>
   </div>
   <span class="muted"><?= icon('chevron') ?></span>
@@ -148,6 +162,9 @@ page_start($item['title'], ['header' => false, 'nav' => false]);
   <h2 class="section-title">Similar items</h2>
   <div class="grid"><?php foreach ($similar as $it) echo item_card($it, $favs); ?></div>
 <?php endif; ?>
+<?php if (!$isOwner): ?>
+  <p class="pad small" style="margin:0"><a class="muted" style="text-decoration:underline" href="report.php?type=item&id=<?= $id ?>">Report this listing</a></p>
+<?php endif; ?>
 <div style="height:24px"></div>
 
 <?php if (!$isOwner): ?>
@@ -158,6 +175,8 @@ page_start($item['title'], ['header' => false, 'nav' => false]);
       <a class="btn btn-primary" href="checkout.php?items=<?= $id ?>">Buy now</a>
     </div>
     <a class="btn btn-ghost" href="conversation.php?item=<?= $id ?>"><?= icon('mail', 18) ?>Message seller</a>
+  <?php elseif ($blockedPair): ?>
+    <p class="muted" style="text-align:center;margin:0">You can't buy from or message this member.</p>
   <?php else: ?>
     <a class="btn" href="conversation.php?item=<?= $id ?>"><?= icon('mail', 18) ?>Message seller</a>
   <?php endif; ?>

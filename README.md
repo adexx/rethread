@@ -1,15 +1,40 @@
 # Rethread
 
-A mobile-first second-hand marketplace in plain PHP + MySQL, built for MAMP.
-Its flows follow the reference app screenshots: browse, item page, checkout, orders, inbox, profile and selling. It has its own name and look.
+A mobile-first second-hand marketplace in plain PHP + MySQL: browse, buy with buyer protection, chat and make offers, sell, review, follow sellers and get alerts. No framework, no build step.
+
+Contributions are welcome. Read **[CONTRIBUTING.md](CONTRIBUTING.md)** to get started.
 
 ## Run it
 
-1. Start MAMP (Apache + MySQL).
-2. Check `config.php`. The defaults are `127.0.0.1:3306`, user `root`, password `root`. If MAMP uses its own ports, set `DB_PORT` to `8889`.
-3. Open http://localhost/vinted/install.php once. It creates the `rethread` database and demo data.
-   - To rebuild everything from scratch, open `install.php?reset=1` or run `php install.php --reset`.
+### With Docker (quickest)
+
+```bash
+docker compose up -d
+docker compose exec app php install.php
+```
+
+Then open http://localhost:8080.
+
+### With MAMP / XAMPP
+
+1. Start MAMP (Apache + MySQL) and put this folder in `htdocs` (for example `htdocs/vinted`).
+2. Check `config.php`. The defaults are `127.0.0.1:3306`, user `root`, password `root`, and `APP_URL` `http://localhost/vinted`. To change any of them, copy `config.local.php.example` to `config.local.php` and edit it. If MAMP uses its own ports, set `DB_PORT` to `8889`.
+3. Run `php install.php` (or open http://localhost/vinted/install.php once). It creates the `rethread` database and demo data.
+   - To rebuild everything from scratch, run `php install.php --reset` (or open `install.php?reset=1`).
 4. Open http://localhost/vinted/ (if Apache is on port 8888, use http://localhost:8888/vinted/).
+
+### Without Apache
+
+```bash
+php install.php
+php -S localhost:8000 scripts/dev-router.php
+```
+
+Set `APP_URL=http://localhost:8000` first.
+
+### Tests
+
+Run `php tests/run.php` (add `--http` to also load the pages of the running site). They use a throwaway `rethread_test` database. GitHub Actions runs them on every push and pull request.
 
 ### Demo accounts (test data only)
 
@@ -30,7 +55,14 @@ Its flows follow the reference app screenshots: browse, item page, checkout, ord
 - **Offers and messages**: chat per item. When the seller accepts an offer, that buyer gets the item at the offer price.
 - **Bundle discounts**: sellers set percentages for 2, 3 and 5+ items. Buyers pick several items on the seller's profile and check out once.
 - **Profile**: wallet, orders, favorites, bundle discounts, vacation mode (hides your items), settings and address, password change, help.
-- **Sell**: upload photos (JPG/PNG/WEBP/GIF, up to 8, checked server-side), plus category, brand, size, condition, colors, material, price and parcel size.
+- **Sell**: upload photos (JPG/PNG/WEBP/GIF, up to 8, checked server-side), plus category, brand, size, condition, colors, material, price and parcel size. Each photo is saved full size for the gallery and as a 480 px thumbnail for grids, chats and lists.
+- **Reviews**: after an order completes, buyer and seller each have 30 days to leave 1–5 stars and a comment. Ratings show on profiles, item pages and in Google results.
+- **Safety**: members can report listings, members, messages and reviews, and block other members (no messages, offers or purchases either way; manage them in Settings › Blocked members). Chat messages that share an email, phone number or link, or mention paying or chatting outside the app, show the recipient a scam warning.
+- **Saved searches**: "Save search" on any search or filter. New matching listings trigger an alert (inbox, email and push), checked every 15 minutes. Profile › Saved searches.
+- **Price drops**: lowering a price tells everyone who favorited the item.
+- **Follow sellers**: follow from a profile; followers are told about new listings, and the home page shows "New from members you follow". Profile › Following.
+- **Installable app**: add to home screen on Android/iPhone/desktop, offline page, and push notifications for messages, offers, orders and alerts (Settings › Push notifications, once VAPID keys are set).
+- **Link previews and SEO**: item, profile and category pages have Open Graph tags (photo, title and price when shared on WhatsApp, Instagram, iMessage…) and Google product data. `robots.txt` and `sitemap.xml` are generated.
 
 ## Demo mode vs live mode
 
@@ -78,6 +110,7 @@ Only accounts with the `admin` role can open it. Admins also see an **Admin pane
 - **Categories**: add, rename, reorder and delete in the tree. A category that has listings can't be deleted.
 - **Pick-up points**: approve or reject shop applications, add and edit points, assign a partner account, pause, set capacity, monthly partner statements.
 - **Fees & shipping**: Buyer Protection fee (fixed + %), sales tax, and the carrier × parcel-size price grid. These override `config.php` and take effect immediately.
+- **Reports**: everything members reported, grouped by listing/member/message/review with how many people reported it. Remove a listing or hide a review in one click, open the member to ban them, or dismiss. A second tab lists chat messages that triggered the scam warning.
 - **Messages**: send a support message to all members, sellers, buyers or one member. It arrives in their Inbox → Notifications.
 - **Email outbox**: every email the site sends, with errors and a preview.
 - **Go-live checklist**: checks your real configuration (HTTPS, keys, webhooks, email, cron, backups, admin 2FA, legal) and lists what's left.
@@ -95,9 +128,18 @@ inc/stripe.php    Stripe Connect client + webhook signatures
 inc/shippo.php    label purchase + label refunds
 inc/mail.php      email outbox + SMTP client
 inc/security.php  tokens, rate limiting, TOTP 2FA
-inc/images.php    photo resizing / metadata stripping
+inc/images.php    photo resizing, thumbnails, metadata stripping
+inc/storage.php   where photos live: uploads/ or an S3-compatible bucket (+ CDN URL)
+inc/community.php reviews, reports, blocks, follows, saved searches, price drops, chat safety
+inc/push.php      Web Push (encryption + VAPID) and the push queue
+inc/monitor.php   Sentry error reporting (PHP and browser)
+sw.js, manifest.webmanifest, offline.html   installable app + push display
+robots.php, sitemap.php   served as robots.txt and sitemap.xml
+tests/run.php     test suite (php tests/run.php)
 cron.php          background jobs (run every minute)
-scripts/backup.sh daily backups
+scripts/          backup.sh (daily backups), vapid_keys.php (push keys), make_thumbs.php (thumbnails for old photos), make_icons.php, dev-router.php (PHP built-in server)
+Dockerfile, docker-compose.yml, docker/   local development with Docker
+.github/          CI workflow (tests on every push and PR), issue and PR templates
 inc/layout.php    page shell, tab bar, item card
 inc/icons.php     inline SVG icons
 assets/           style.css, app.js, admin.css
@@ -108,3 +150,13 @@ placeholder.php   SVG product illustrations for demo items
 ```
 
 Security basics: prepared statements, CSRF tokens on every form, `password_hash`, output escaping, upload re-encoding, rate limiting, 2FA, signed and idempotent webhooks. See DEPLOY.md before going live.
+
+## Contributing
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): setup, code style and how to send a pull request
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [SECURITY.md](SECURITY.md): report vulnerabilities privately
+
+## License
+
+[MIT](LICENSE)

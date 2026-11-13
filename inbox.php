@@ -4,18 +4,21 @@ $u = require_login();
 $tab = ($_GET['tab'] ?? 'messages') === 'notifications' ? 'notifications' : 'messages';
 $counts = unread_counts();
 
-$convs = q("SELECT c.*, i.title,
-              (SELECT p.path FROM item_photos p WHERE p.item_id = c.item_id ORDER BY p.sort LIMIT 1) AS photo,
+// Up to 100 most recent conversations. Each side (buying/selling) is read from its own index, and the
+// last message comes from conversations.last_message_id instead of being searched for per conversation.
+$convs = q("SELECT c.id, c.item_id, c.updated_at, i.title,
+              (SELECT COALESCE(p.thumb, p.path) FROM item_photos p WHERE p.item_id = c.item_id ORDER BY p.sort, p.id LIMIT 1) AS photo,
               ou.id AS other_id, ou.username AS other_name, ou.avatar_color,
-              (SELECT m.body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_body,
-              (SELECT m.offer_amount FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_offer,
-              (SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id) AS last_at,
-              (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_id <> ? AND m.read_at IS NULL) AS unread
-            FROM conversations c
+              lm.body AS last_body, lm.offer_amount AS last_offer, lm.created_at AS last_at,
+              (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.read_at IS NULL AND m.sender_id <> ?) AS unread
+            FROM ((SELECT id FROM conversations WHERE buyer_id = ? ORDER BY updated_at DESC LIMIT 100)
+                  UNION
+                  (SELECT id FROM conversations WHERE seller_id = ? ORDER BY updated_at DESC LIMIT 100)) pick
+            JOIN conversations c ON c.id = pick.id
+            JOIN messages lm ON lm.id = c.last_message_id
             JOIN items i ON i.id = c.item_id
             JOIN users ou ON ou.id = IF(c.buyer_id = ?, c.seller_id, c.buyer_id)
-            WHERE c.buyer_id = ? OR c.seller_id = ?
-            ORDER BY last_at DESC", [$u['id'], $u['id'], $u['id'], $u['id']])->fetchAll();
+            ORDER BY c.updated_at DESC LIMIT 100", [$u['id'], $u['id'], $u['id'], $u['id']])->fetchAll();
 
 $notes = [];
 if ($tab === 'notifications') {

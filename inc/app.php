@@ -9,14 +9,8 @@ date_default_timezone_set(APP_TIMEZONE);
 error_reporting(E_ALL);
 ini_set('display_errors', IS_PRODUCTION ? '0' : '1');
 ini_set('log_errors', '1');
-if (IS_PRODUCTION) {
-    set_exception_handler(function (Throwable $e) {
-        error_log((string)$e);
-        if (!headers_sent()) http_response_code(500);
-        echo '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui;padding:24px">'
-           . '<h2>Something went wrong</h2><p>Please try again in a moment. If it keeps happening, contact ' . htmlspecialchars(SUPPORT_EMAIL) . '.</p></body>';
-    });
-}
+require_once __DIR__ . '/monitor.php';
+monitor_init();   // uncaught errors: logged, sent to Sentry when configured, friendly page in production
 
 function is_https(): bool
 {
@@ -329,7 +323,7 @@ function category_path_label(int $id, string $sep = ' › '): string
 function item_select(): string
 {
     return 'SELECT i.*, u.username,
-              (SELECT p.path FROM item_photos p WHERE p.item_id = i.id ORDER BY p.sort, p.id LIMIT 1) AS photo,
+              (SELECT COALESCE(p.thumb, p.path) FROM item_photos p WHERE p.item_id = i.id ORDER BY p.sort, p.id LIMIT 1) AS photo,
               (SELECT COUNT(*) FROM favorites f WHERE f.item_id = i.id) AS favs
             FROM items i JOIN users u ON u.id = i.user_id';
 }
@@ -416,7 +410,7 @@ function user_favorites(): array
 
 function photo_url(?string $path, string $seed = 'x'): string
 {
-    if ($path) return $path;
+    if ($path) return media_url($path);
     return 'placeholder.php?seed=' . urlencode($seed);
 }
 
@@ -424,6 +418,7 @@ function photo_url(?string $path, string $seed = 'x'): string
 function notify(int $userId, string $body, string $link, bool $email = true): void
 {
     q('INSERT INTO notifications (user_id, body, link, created_at) VALUES (?, ?, ?, NOW())', [$userId, $body, $link]);
+    queue_push($userId, APP_NAME, $body, $link);
     if ($email) {
         $u = q('SELECT email, username, email_notifications, deleted_at FROM users WHERE id = ?', [$userId])->fetch();
         if ($u && $u['email_notifications'] && !$u['deleted_at']) {
@@ -442,8 +437,9 @@ function unread_counts(): array
 {
     $u = user();
     if (!$u) return ['messages' => 0, 'notifications' => 0];
-    $m = (int)q('SELECT COUNT(*) FROM messages m JOIN conversations c ON c.id = m.conversation_id
-                 WHERE (c.buyer_id = ? OR c.seller_id = ?) AND m.sender_id <> ? AND m.read_at IS NULL',
+    // Runs on every page (tab bar dot), so each side of the conversation list uses its own index.
+    $m = (int)q('SELECT COUNT(*) FROM (SELECT id FROM conversations WHERE buyer_id = ? UNION ALL SELECT id FROM conversations WHERE seller_id = ?) c
+                 JOIN messages m ON m.conversation_id = c.id AND m.read_at IS NULL AND m.sender_id <> ?',
                  [$u['id'], $u['id'], $u['id']])->fetchColumn();
     $n = (int)q('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL', [$u['id']])->fetchColumn();
     return ['messages' => $m, 'notifications' => $n];
@@ -476,3 +472,6 @@ require_once __DIR__ . '/stripe.php';
 require_once __DIR__ . '/shippo.php';
 require_once __DIR__ . '/orders.php';
 require_once __DIR__ . '/pudo.php';
+require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/push.php';
+require_once __DIR__ . '/community.php';

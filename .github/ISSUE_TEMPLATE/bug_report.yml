@@ -1,0 +1,31 @@
+name: Bug report
+description: Something doesn't work the way it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Log in as demo@example.com
+        2. Open …
+        3. Click …
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: Docker / MAMP / other, PHP version, browser and device
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors or screenshots
+      description: PHP error log lines, browser console errors or screenshots. Remove any passwords, keys or personal data first.

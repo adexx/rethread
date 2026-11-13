@@ -79,17 +79,39 @@ Add to the server's crontab (`crontab -e`):
 15 3 * * * DB_USER=rethread DB_PASS='…' /var/www/rethread/scripts/backup.sh >> /var/log/rethread-backup.log 2>&1
 ```
 
-`cron.php` sends email, releases abandoned checkouts, reminds sellers to ship (after 3 days), cancels and refunds unshipped orders (after 7 days), completes delivered orders once the buyer-protection window has passed, and cleans up old records.
+`cron.php` sends email and push notifications, sends saved-search alerts, releases abandoned checkouts, reminds sellers to ship (after 3 days), cancels and refunds unshipped orders (after 7 days), completes delivered orders once the buyer-protection window has passed, and cleans up old records.
 
 Backups are written to `backups/`. **Copy them off the server every day**, for example `rclone copy backups remote:rethread-backups` to S3 or Backblaze B2. Try restoring one once so you know it works:
 `gunzip -c backups/db-….sql.gz | mysql rethread_restore_test`.
+
+## 6b. Photos, push notifications and error monitoring
+
+**Photo storage (needed before you run more than one web server).** Create a bucket on AWS S3, Cloudflare R2 (no download fees), DigitalOcean Spaces or Backblaze B2, make it publicly readable for `uploads/*`, and set:
+
+```
+STORAGE_DRIVER=s3
+S3_BUCKET=rethread-photos
+S3_REGION=us-east-1            # 'auto' for R2
+S3_KEY=…  S3_SECRET=…
+S3_ENDPOINT=                   # empty for AWS; https://<account>.r2.cloudflarestorage.com for R2
+MEDIA_URL=https://cdn.example.com   # optional: a CDN (CloudFront, Cloudflare) in front of the bucket
+```
+
+Copy existing photos across once (`aws s3 sync uploads/ s3://rethread-photos/uploads/` or `rclone`), then run `php scripts/make_thumbs.php` so older photos get thumbnails too.
+
+**Push notifications.** Run `php scripts/vapid_keys.php` once and put the two printed lines in `config.local.php` (or set `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY`). Keep the private key secret and don't change it later: existing subscriptions stop working. Push needs HTTPS. On iPhone, members must add the site to their Home Screen first (iOS 16.4+). Pushes are queued and sent by `cron.php`, so they arrive within a minute.
+
+**Error monitoring.** Create a free project at sentry.io (PHP platform) and set `SENTRY_DSN`. PHP exceptions, fatal errors, failed cron jobs and browser JavaScript errors are then reported with the page and the member's id (never their name or email).
+
+**Tests.** Run `php tests/run.php --http` on the server after each deploy. It builds a throwaway `rethread_test` database (the MySQL user needs permission to create and drop it), runs the checks, loads the main pages, and exits non-zero if anything fails, so it can gate a deploy script.
 
 ## 7. Before you announce it
 
 - [ ] Every item on **Admin › Go-live checklist** is green.
 - [ ] Switch Stripe and Shippo to live keys and update the webhook secrets (live and test webhooks have different secrets).
 - [ ] Do one real purchase with a cheap item between two of your own accounts, then refund it.
-- [ ] Set up uptime monitoring (UptimeRobot, Better Stack) and error alerts (read the PHP error log, or add Sentry).
+- [ ] Set up uptime monitoring (UptimeRobot, Better Stack) and set `SENTRY_DSN` for error alerts.
+- [ ] Decide who checks **Admin › Reports** every day.
 - [ ] Decide who answers `SUPPORT_EMAIL` and checks **Admin › Orders › Disputed** every day.
 
 ## Configuration reference
@@ -110,3 +132,7 @@ All settings live in `config.php`. Override them with environment variables or w
 | `LOGIN_MAX_ATTEMPTS`, `LOGIN_LOCK_MINUTES` | Sign-in lockout (default 5 tries per 15 minutes) |
 | `CRON_TOKEN` | Lets you trigger `cron.php?token=…` over HTTPS if you can't use crontab |
 | `COMPANY_*`, `SUPPORT_EMAIL`, `GOVERNING_STATE`, `LEGAL_REVIEWED` | Shown in the legal pages and emails |
+| `STORAGE_DRIVER`, `S3_*`, `MEDIA_URL` | Where photos are stored and served from (`local` by default) |
+| `THUMB_MAX_EDGE` | Thumbnail size in pixels (default 480) |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Push notifications; generate with `php scripts/vapid_keys.php` |
+| `SENTRY_DSN` | Error reporting to Sentry; empty = PHP error log only |

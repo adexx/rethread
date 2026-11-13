@@ -69,7 +69,7 @@ if (is_post()) {
             if (!isset($ext[$mime]) || !@getimagesize($files['tmp_name'][$n])) { $errors[] = 'Photos must be JPG, PNG, WEBP or GIF images.'; continue; }
             if (count($uploads) >= MAX_PHOTOS) continue;
             // Resize and re-encode now: strips EXIF/GPS data and anything hidden in the file.
-            $path = process_photo($files['tmp_name'][$n], $mime);
+            $path = process_photo($files['tmp_name'][$n], $mime);   // ['path' => …, 'thumb' => …]
             if ($path === null) { $errors[] = 'One photo could not be read or is smaller than 200×200 pixels.'; continue; }
             $uploads[] = $path;
         }
@@ -81,8 +81,11 @@ if (is_post()) {
     if ($errors) foreach ($uploads as $path) delete_photo_file($path);   // don't leave orphaned files
     if (!$errors) {
         $data = [$v['category_id'], $v['title'], $v['description'], $v['brand'], $v['size'], $v['condition_label'], implode(',', $v['colors']), $v['material'], round((float)$v['price'], 2), $v['parcel_size']];
+        $isNew = !$item;
         if ($item) {
             q('UPDATE items SET category_id=?, title=?, description=?, brand=?, size=?, condition_label=?, colors=?, material=?, price=?, parcel_size=? WHERE id = ?', array_merge($data, [$id]));
+            // Members who favorited it hear about a lower price.
+            $fans = notify_price_drop(['title' => $v['title']] + $item, (float)$item['price'], round((float)$v['price'], 2));
         } else {
             q("INSERT INTO items (category_id, title, description, brand, size, condition_label, colors, material, price, parcel_size, user_id, status, created_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?, 'active', NOW())", array_merge($data, [$u['id']]));
@@ -90,15 +93,16 @@ if (is_post()) {
         }
         foreach ($photos as $p) {
             if (in_array((int)$p['id'], $remove, true)) {
-                delete_photo_file($p['path']);
+                delete_photo_file($p);
                 q('DELETE FROM item_photos WHERE id = ?', [$p['id']]);
             }
         }
         $sort = (int)q('SELECT COALESCE(MAX(sort), -1) + 1 FROM item_photos WHERE item_id = ?', [$id])->fetchColumn();
         foreach ($uploads as $path) {
-            q('INSERT INTO item_photos (item_id, path, sort) VALUES (?, ?, ?)', [$id, $path, $sort++]);
+            q('INSERT INTO item_photos (item_id, path, thumb, sort) VALUES (?, ?, ?, ?)', [$id, $path['path'], $path['thumb'], $sort++]);
         }
-        flash($item ? 'Listing updated.' : 'Your item is live!');
+        if ($isNew && !$u['vacation_mode']) notify_followers((int)$u['id'], $u['username'] . ' listed "' . $v['title'] . '" for ' . money($v['price']) . '.', 'item.php?id=' . $id);
+        flash($item ? 'Listing updated.' . (!empty($fans) ? ' We told ' . $fans . ' member' . ($fans === 1 ? '' : 's') . ' who favorited it about the lower price.' : '') : 'Your item is live!');
         redirect('item.php?id=' . $id);
     }
 }
@@ -120,7 +124,7 @@ page_start($item ? 'Edit listing' : 'Sell an item', ['back' => $item ? 'item.php
   <?php if ($photos): ?>
     <div class="photo-previews" style="margin-top:8px">
       <?php foreach ($photos as $p): ?>
-        <figure><img src="<?= e($p['path']) ?>" alt=""><label><input type="checkbox" name="remove_photo[]" value="<?= (int)$p['id'] ?>">Remove</label></figure>
+        <figure><img src="<?= e(media_url($p['thumb'] ?: $p['path'])) ?>" alt=""><label><input type="checkbox" name="remove_photo[]" value="<?= (int)$p['id'] ?>">Remove</label></figure>
       <?php endforeach; ?>
     </div>
   <?php endif; ?>

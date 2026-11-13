@@ -38,6 +38,7 @@ function admin_start(string $title, string $active): void
         'orders' => ['orders.php', 'orders', 'Orders'],
         'users' => ['users.php', 'user', 'Members'],
         'items' => ['items.php', 'tag', 'Listings'],
+        'reports' => ['reports.php', 'info', 'Reports'],
         'categories' => ['categories.php', 'dots9', 'Categories'],
         'pickup' => ['pickup.php', 'store', 'Pick-up points'],
         'settings' => ['settings.php', 'settings', 'Fees & shipping'],
@@ -47,6 +48,7 @@ function admin_start(string $title, string $active): void
         'log' => ['log.php', 'clock', 'Activity log'],
     ];
     $disputes = (int)q("SELECT COUNT(*) FROM orders WHERE status = 'suspended'")->fetchColumn();
+    $openReports = (int)q("SELECT COUNT(DISTINCT target_type, target_id) FROM reports WHERE status = 'open'")->fetchColumn();
     $f = flash();
     ?><!doctype html>
 <html lang="en">
@@ -55,7 +57,7 @@ function admin_start(string $title, string $active): void
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= e($title) ?> · <?= e(APP_NAME) ?> Admin</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23f2a65a'/><text x='16' y='23' font-size='19' font-family='Arial' font-weight='700' text-anchor='middle' fill='%2316191c'>r</text></svg>">
-<link rel="stylesheet" href="../assets/style.css?v=4">
+<link rel="stylesheet" href="../assets/style.css?v=5">
 <link rel="stylesheet" href="../assets/admin.css?v=1">
 </head>
 <body class="admin">
@@ -65,7 +67,8 @@ function admin_start(string $title, string $active): void
     <nav>
       <?php foreach ($nav as $k => [$href, $ic, $label]): ?>
         <a href="<?= $href ?>" class="<?= $active === $k ? 'on' : '' ?>"><?= icon($ic, 20) ?><span><?= $label ?></span>
-          <?php if ($k === 'orders' && $disputes): ?><em class="count" title="<?= $disputes ?> disputed"><?= $disputes ?></em><?php endif; ?></a>
+          <?php if ($k === 'orders' && $disputes): ?><em class="count" title="<?= $disputes ?> disputed"><?= $disputes ?></em><?php endif; ?>
+          <?php if ($k === 'reports' && $openReports): ?><em class="count" title="<?= $openReports ?> open"><?= $openReports ?></em><?php endif; ?></a>
       <?php endforeach; ?>
     </nav>
     <div class="adm-side-foot">
@@ -81,7 +84,7 @@ function admin_start(string $title, string $active): void
 
 function admin_end(): void
 {
-    echo "  </div>\n</div>\n<script src=\"../assets/app.js?v=3\"></script>\n</body>\n</html>";
+    echo "  </div>\n</div>\n<script src=\"../assets/app.js?v=5\"></script>\n</body>\n</html>";
 }
 
 function status_badge(string $status): string

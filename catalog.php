@@ -1,59 +1,39 @@
 <?php
 require __DIR__ . '/inc/app.php';
 $cats = categories();
-$catId = (int)($_GET['cat'] ?? 0);
-if ($catId && !isset($cats[$catId])) $catId = 0;
-$qText = trim((string)($_GET['q'] ?? ''));
-$sizes = array_filter((array)($_GET['size'] ?? []), 'is_string');
-$brands = array_filter((array)($_GET['brand'] ?? []), 'is_string');
-$conds = array_filter((array)($_GET['cond'] ?? []), 'is_string');
-$colors = array_filter((array)($_GET['color'] ?? []), 'is_string');
-$min = ($_GET['min'] ?? '') !== '' ? (float)$_GET['min'] : null;
-$max = ($_GET['max'] ?? '') !== '' ? (float)$_GET['max'] : null;
+$filters = catalog_filters($_GET);
+$catId = $filters['cat'];
+$qText = $filters['q'];
+$sizes = $filters['size'];
+$brands = $filters['brand'];
+$conds = $filters['cond'];
+$colors = $filters['color'];
+$min = $filters['min'];
+$max = $filters['max'];
 $sort = (string)($_GET['sort'] ?? 'relevance');
 $page = min(100, max(1, (int)($_GET['page'] ?? 1)));
 $perPage = 24;
 
-$where = ["i.status = 'active'", 'u.vacation_mode = 0', 'u.banned = 0'];
-$params = [];
-if ($catId) {
-    $ids = category_descendants($catId);
-    $where[] = 'i.category_id IN (' . implode(',', array_map('intval', $ids)) . ')';
-}
+[$whereSql, $params] = catalog_where($filters);
 $members = [];
-if ($qText !== '') {
-    $ft = fulltext_query($qText);
-    if ($ft !== '') {
-        // Uses the ft_search index instead of scanning every listing.
-        $where[] = 'MATCH(i.title, i.brand, i.description) AGAINST (? IN BOOLEAN MODE)';
-        $params[] = $ft;
-    } else {
-        // Only short words or stopwords (e.g. "XS"): fall back to a title/brand match.
-        $where[] = '(i.title LIKE ? OR i.brand LIKE ?)';
-        $like = '%' . like_escape($qText) . '%';
-        array_push($params, $like, $like);
-    }
-    // Members whose username starts with the search text (uses the username index).
-    if ($page === 1 && preg_match('/^\S+$/u', $qText)) {
-        $members = q("SELECT id, username, avatar_color FROM users WHERE username LIKE ? AND banned = 0 AND deleted_at IS NULL ORDER BY username LIMIT 6",
-            [like_escape(ltrim($qText, '@')) . '%'])->fetchAll();
-    }
+// Members whose username starts with the search text (uses the username index).
+if ($qText !== '' && $page === 1 && preg_match('/^\S+$/u', $qText)) {
+    $members = q("SELECT id, username, avatar_color FROM users WHERE username LIKE ? AND banned = 0 AND deleted_at IS NULL ORDER BY username LIMIT 6",
+        [like_escape(ltrim($qText, '@')) . '%'])->fetchAll();
 }
-$in = function (string $col, array $vals) use (&$where, &$params) {
-    if (!$vals) return;
-    $where[] = $col . ' IN (' . implode(',', array_fill(0, count($vals), '?')) . ')';
-    foreach ($vals as $v) $params[] = $v;
-};
-$in('i.size', $sizes);
-$in('i.brand', $brands);
-$in('i.condition_label', $conds);
-if ($colors) {
-    $or = [];
-    foreach ($colors as $c) { $or[] = 'FIND_IN_SET(?, i.colors)'; $params[] = $c; }
-    $where[] = '(' . implode(' OR ', $or) . ')';
+
+// Save this search (alerts for new listings).
+$me = user();
+if (is_post() && ($_POST['action'] ?? '') === 'save_search') {
+    check_csrf();
+    $me = require_login();
+    if (!saved_search_add((int)$me['id'], $filters)) flash('You can keep up to ' . MAX_SAVED_SEARCHES . ' saved searches. Remove one in Profile › Saved searches.', 'err');
+    else flash("Search saved. We'll let you know when new items match.");
+    redirect('catalog.php?' . catalog_query($filters));
 }
-if ($min !== null) { $where[] = 'i.price >= ?'; $params[] = $min; }
-if ($max !== null) { $where[] = 'i.price <= ?'; $params[] = $max; }
+$savedSearch = $me && ($qText !== '' || $catId || $sizes || $brands || $conds || $colors || $min !== null || $max !== null)
+    ? saved_search_find((int)$me['id'], $filters) : null;
+$canSave = $qText !== '' || $catId || $sizes || $brands || $conds || $colors || $min !== null || $max !== null;
 
 // Every sort ends with i.id so pages never overlap or skip items with equal values.
 $order = [
@@ -63,7 +43,6 @@ $order = [
     'price_desc' => 'i.price DESC, i.id DESC',
 ][$sort] ?? 'i.sort_at DESC, i.id DESC';
 
-$whereSql = ' WHERE ' . implode(' AND ', $where);
 // The page only shows "500+" above 500, so stop counting there.
 $total = (int)q('SELECT COUNT(*) FROM (SELECT 1 FROM items i STRAIGHT_JOIN users u ON u.id = i.user_id' . $whereSql . ' LIMIT 501) t', $params)->fetchColumn();
 // One page at a time; ask for one extra row to know whether there is a next page.
@@ -97,7 +76,12 @@ $qs = function (array $override = []) {
 };
 $activeCount = count($sizes) + count($brands) + count($conds) + count($colors) + ($min !== null || $max !== null ? 1 : 0);
 
-page_start($title, ['tab' => 'browse', 'header' => false]);
+// Plain category pages are worth indexing; filtered, searched or paged views are not (endless near-duplicates).
+$plain = $qText === '' && !$sizes && !$brands && !$conds && !$colors && $min === null && $max === null && $page === 1;
+page_start($title, ['tab' => 'browse', 'header' => false, 'noindex' => !$plain,
+    'meta' => ['description' => 'Shop second-hand ' . ($catId ? category_path_label($catId, ' ') : 'fashion, books and more') . ' on ' . APP_NAME . '. Buyer Protection on every order.',
+               'canonical' => $plain ? app_url('catalog.php' . ($catId ? '?cat=' . $catId : '')) : '',
+               'image' => $items ? photo_url($items[0]['photo'], (string)$items[0]['id']) : app_url('assets/icons/og-default.png')]]);
 ?>
 <form class="searchbar" action="catalog.php" role="search">
   <a class="iconbtn" href="<?= e($back) ?>" aria-label="Back"><?= icon('back') ?></a>
@@ -115,7 +99,14 @@ page_start($title, ['tab' => 'browse', 'header' => false]);
 </div>
 
 <div class="spread" style="padding:4px 16px 14px">
-  <span class="muted"><?= $total > 500 ? '500+' : $total ?> result<?= $total === 1 ? '' : 's' ?></span>
+  <span class="row gap-8"><span class="muted"><?= $total > 500 ? '500+' : $total ?> result<?= $total === 1 ? '' : 's' ?></span>
+  <?php if ($canSave && $page === 1): ?>
+    <?php if ($savedSearch): ?>
+      <a class="chip on" href="saved_searches.php" title="You'll get alerts for new matches"><?= icon('bookmark', 16) ?>Saved</a>
+    <?php else: ?>
+      <form method="post" style="margin:0"><?= csrf_field() ?><input type="hidden" name="action" value="save_search"><button class="chip"><?= icon('bookmark', 16) ?>Save search</button></form>
+    <?php endif; ?>
+  <?php endif; ?></span>
   <form action="catalog.php">
     <?php foreach ($_GET as $k => $v): if (in_array($k, ['sort', 'page'], true)) continue; foreach ((array)$v as $vv): ?>
       <input type="hidden" name="<?= e($k) . (is_array($v) ? '[]' : '') ?>" value="<?= e($vv) ?>">

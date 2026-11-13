@@ -1,11 +1,13 @@
 <?php
 require __DIR__ . '/inc/app.php';
 $u = require_login();
-$favPhotos = q('SELECT (SELECT p.path FROM item_photos p WHERE p.item_id = f.item_id ORDER BY p.sort LIMIT 1) AS photo
+$favPhotos = q('SELECT (SELECT COALESCE(p.thumb, p.path) FROM item_photos p WHERE p.item_id = f.item_id ORDER BY p.sort LIMIT 1) AS photo
                 FROM favorites f WHERE f.user_id = ? ORDER BY f.created_at DESC LIMIT 4', [$u['id']])->fetchAll(PDO::FETCH_COLUMN);
 $listings = (int)q("SELECT COUNT(*) FROM items WHERE user_id = ? AND status <> 'sold'", [$u['id']])->fetchColumn();
 $hasSale = (bool)q("SELECT 1 FROM orders WHERE seller_id = ? AND status = 'completed' LIMIT 1", [$u['id']])->fetchColumn();
 $badges = ($listings > 0 ? 1 : 0) + ($hasSale ? 1 : 0);
+$savedCount = (int)q('SELECT COUNT(*) FROM saved_searches WHERE user_id = ?', [$u['id']])->fetchColumn();
+$followingCount = (int)q('SELECT COUNT(*) FROM follows WHERE follower_id = ?', [$u['id']])->fetchColumn();
 $needsAction = $u['address_line'] === '' || $u['phone'] === '' || !$u['email_verified_at'];
 
 function mi(string $href, string $ic, string $label, string $val = '', string $extra = ''): string
@@ -34,6 +36,8 @@ page_start('Profile', ['tab' => 'profile']);
   foreach ($favPhotos as $n => $p) $stack .= '<img src="' . e(photo_url($p, 'f' . $n)) . '" alt="">';
   $stack .= '</span>';
   echo mi('favorites.php', 'heart', 'Favorite items', '', $favPhotos ? $stack : '');
+  echo mi('saved_searches.php', 'bookmark', 'Saved searches', $savedCount ? (string)$savedCount : '');
+  echo mi('following.php', 'user', 'Following', $followingCount ? (string)$followingCount : '');
   ?>
 </nav>
 <?php if (is_admin()): ?>
